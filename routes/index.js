@@ -3,21 +3,34 @@ var router = express.Router();
 const ytdl = require("@distube/ytdl-core");
 const ffmpeg = require('fluent-ffmpeg');
 const { PassThrough } = require('stream');
-const concat = require('concat-stream'); // To handle buffers in memory
 const { removeDuplicatesByQualityLabel, dataFilter, sanitizeFileName } = require("../utils/ytdlDataFilter");
 let url = String;
-const fs = require('fs');
-const path = require('path');
-const { tmpdir } = require('os');
-const { pipeline } = require('stream/promises');
-const { createWriteStream } = require('fs');
 
+/* Helper function for delay */
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-/* GET home page. */
+/* Retry logic with exponential backoff */
+async function fetchVideoInfoWithRetry(url, retries = 3, delayMs = 1000) {
+  try {
+    return await ytdl.getInfo(url);
+  } catch (error) {
+    if (retries === 0 || error.statusCode !== 429) {
+      throw error;
+    }
+    console.log(`Retrying due to 429 error... Attempts left: ${retries}`);
+    await delay(delayMs);
+    return fetchVideoInfoWithRetry(url, retries - 1, delayMs * 2); // Exponential backoff
+  }
+}
+
+/* GET home page */
 router.get('/', function (req, res) {
   res.render('index', { uniqueVideoDetails: [], videoInfo: null });
 });
 
+/* Handle video info retrieval */
 router.post('/link', async function (req, res) {
   url = req.body.url;
   if (!url || !ytdl.validateURL(url)) {
@@ -25,7 +38,7 @@ router.post('/link', async function (req, res) {
   }
 
   try {
-    const info = await ytdl.getInfo(url);
+    const info = await fetchVideoInfoWithRetry(url);
     const qualityLabel = dataFilter(info);
     const uniqueVideoDetails = removeDuplicatesByQualityLabel(qualityLabel);
 
@@ -43,7 +56,7 @@ router.post('/link', async function (req, res) {
   }
 });
 
-
+/* Handle download request */
 router.post('/download', async function (req, res) {
   const qualityLabel = req.body.quality;
   if (!qualityLabel) {
@@ -62,7 +75,7 @@ router.post('/download', async function (req, res) {
   const itag = itagMap[qualityLabel];
 
   try {
-    const info = await ytdl.getInfo(url);
+    const info = await fetchVideoInfoWithRetry(url);
     const sanitizedTitle = sanitizeFileName(info.videoDetails.title)
       .replace(/[<>:"\/\\|?*]+/g, '_')
       .substring(0, 100);
@@ -70,55 +83,45 @@ router.post('/download', async function (req, res) {
     const videoFormat = ytdl.chooseFormat(info.formats, { quality: itag });
     const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
 
-    const videoPath = path.join(__dirname, `${sanitizedTitle}_video.mp4`);
-    const audioPath = path.join(__dirname, `${sanitizedTitle}_audio.mp3`);
-    const mergedPath = path.join(__dirname, `${sanitizedTitle}_merged.mp4`);
-
-    const videoWriteStream = createWriteStream(videoPath);
-    const audioWriteStream = createWriteStream(audioPath);
-
     const videoStream = ytdl(url, { format: videoFormat });
     const audioStream = ytdl(url, { format: audioFormat });
 
-    videoStream.pipe(videoWriteStream);
-    audioStream.pipe(audioWriteStream);
+    // Create in-memory streams
+    const videoPassThrough = new PassThrough();
+    const audioPassThrough = new PassThrough();
 
-    await Promise.all([
-      new Promise((resolve, reject) => videoWriteStream.on('finish', resolve).on('error', reject)),
-      new Promise((resolve, reject) => audioWriteStream.on('finish', resolve).on('error', reject))
-    ]);
+    // Pipe the video and audio streams to the PassThrough objects
+    videoStream.pipe(videoPassThrough);
+    audioStream.pipe(audioPassThrough);
 
-    await new Promise((resolve, reject) => {
-      ffmpeg()
-        .input(videoPath)
-        .input(audioPath)
-        .videoCodec('copy')
-        .audioCodec('aac')
-        .format('mp4')
-        .outputOptions(['-preset fast'])
-        .on('end', resolve)
-        .on('error', reject)
-        .save(mergedPath);
-    });
+    // Merging video and audio using fluent-ffmpeg
+    const mergedStream = new PassThrough();
+    ffmpeg()
+      .input(videoPassThrough)
+      .input(audioPassThrough)
+      .videoCodec('copy')
+      .audioCodec('aac')
+      .format('mp4')
+      .on('start', () => {
+        console.log('Merging video and audio...');
+      })
+      .on('error', (err) => {
+        console.error('FFmpeg error:', err);
+        if (!res.headersSent) {
+          res.redirect('/');
+        }
+      })
+      .on('end', () => {
+        console.log('Merging complete.');
+      })
+      .pipe(mergedStream); // Output directly to the response
 
+    // Set headers for the download
     res.header('Content-Disposition', `attachment; filename="${sanitizedTitle}_merged.mp4"`);
     res.header('Content-Type', 'video/mp4');
-    
-    const readStream = fs.createReadStream(mergedPath);
-    readStream.pipe(res);
 
-    readStream.on('end', () => {
-      fs.unlinkSync(videoPath);
-      fs.unlinkSync(audioPath);
-      fs.unlinkSync(mergedPath);
-    });
-
-    readStream.on('error', (err) => {
-      console.error('Error streaming the file:', err);
-      if (!res.headersSent) {
-        res.redirect('/');
-      }
-    });
+    // Send the merged video to the response
+    mergedStream.pipe(res);
 
   } catch (error) {
     console.error('Download failed:', error);
