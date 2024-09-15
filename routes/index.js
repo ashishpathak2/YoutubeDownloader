@@ -11,19 +11,20 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/* Retry logic with exponential backoff */
-async function fetchVideoInfoWithRetry(url, retries = 3, delayMs = 1000) {
+/* Retry logic with increased retries and delay */
+async function fetchVideoInfoWithRetry(url, retries = 5, delayMs = 5000) { // Increased retries and initial delay
   try {
     return await ytdl.getInfo(url);
   } catch (error) {
     if (retries === 0 || error.statusCode !== 429) {
-      throw error;
+      throw error; // Exit if no retries left or error is not 429
     }
-    console.log(`Retrying due to 429 error... Attempts left: ${retries}`);
+    console.log(`Retrying due to 429 error... Attempts left: ${retries}, waiting ${delayMs / 1000} seconds`);
     await delay(delayMs);
-    return fetchVideoInfoWithRetry(url, retries - 1, delayMs * 2); // Exponential backoff
+    return fetchVideoInfoWithRetry(url, retries - 1, delayMs * 2); // Exponentially increase delay
   }
 }
+
 
 /* GET home page */
 router.get('/', function (req, res) {
