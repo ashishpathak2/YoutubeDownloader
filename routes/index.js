@@ -1,6 +1,6 @@
 var express = require('express');
 var router = express.Router();
-const ytdl = require("@distube/ytdl-core");
+const ytdl = require("ytdl-core");
 const ffmpeg = require('fluent-ffmpeg');
 const { PassThrough } = require('stream');
 const { removeDuplicatesByQualityLabel, dataFilter, sanitizeFileName } = require("../utils/ytdlDataFilter");
