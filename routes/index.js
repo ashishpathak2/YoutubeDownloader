@@ -71,8 +71,8 @@ router.post('/download', async function (req, res) {
     const outputFile = path.resolve(tempDir, `${sanitizedTitle}_merged.mp4`);
 
     // Download video and audio separately to temp files
-    const videoStream = ytdl(url, { quality: itag });
-    const audioStream = ytdl(url, { quality: 'highestaudio' });
+    const videoStream = ytdl(url, { quality: itag , requestOptions: { proxy: 'http://localhost:3000'} });
+    const audioStream = ytdl(url, { quality: 'highestaudio' , requestOptions: { proxy: 'http://localhost:3000'}});
 
     // Pipe video and audio to files
     const videoWriteStream = fs.createWriteStream(videoPath);
