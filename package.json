@@ -16,6 +16,8 @@
     "fluent-ffmpeg": "^2.1.3",
     "http-errors": "~1.6.3",
     "morgan": "~1.9.1",
+    "promise-throttle": "^1.1.2",
+    "proxy-agent": "^6.4.0",
     "ytdl-core": "^4.11.5"
   }
 }

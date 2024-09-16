@@ -1,10 +1,12 @@
 var express = require('express');
 var router = express.Router();
-const ytdl = require("ytdl-core");
+const ytdl = require("@distube/ytdl-core");
+const fs = require('fs');
+const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
-const { PassThrough } = require('stream');
+const os = require('os');
 const { removeDuplicatesByQualityLabel, dataFilter, sanitizeFileName } = require("../utils/ytdlDataFilter");
-let url = String;
+let url = ""; // Ensuring URL is initialized as an empty string
 
 /* Helper function for delay */
 function delay(ms) {
@@ -12,7 +14,11 @@ function delay(ms) {
 }
 
 /* Retry logic with increased retries and delay */
-async function fetchVideoInfoWithRetry(url, retries = 5, delayMs = 5000) { // Increased retries and initial delay
+async function fetchVideoInfoWithRetry(url, retries = 5, delayMs = 5000) {
+  if (typeof url !== 'string') {
+    throw new TypeError('URL must be a string'); // Validate URL type
+  }
+
   try {
     return await ytdl.getInfo(url);
   } catch (error) {
@@ -25,7 +31,6 @@ async function fetchVideoInfoWithRetry(url, retries = 5, delayMs = 5000) { // In
   }
 }
 
-
 /* GET home page */
 router.get('/', function (req, res) {
   res.render('index', { uniqueVideoDetails: [], videoInfo: null });
@@ -33,9 +38,9 @@ router.get('/', function (req, res) {
 
 /* Handle video info retrieval */
 router.post('/link', async function (req, res) {
-  url = req.body.url;
+  url = String(req.body.url).trim(); // Ensure URL is a string and trimmed
   if (!url || !ytdl.validateURL(url)) {
-    return res.redirect("/");
+    return res.redirect("/"); // Or send an appropriate error message
   }
 
   try {
@@ -53,15 +58,15 @@ router.post('/link', async function (req, res) {
     res.render("index", { uniqueVideoDetails, videoInfo });
   } catch (error) {
     console.error('Error fetching video info:', error);
-    res.redirect("/");
+    res.redirect("/"); // Or send an appropriate error message
   }
 });
 
-/* Handle download request */
+/* Handle video download and merging */
 router.post('/download', async function (req, res) {
   const qualityLabel = req.body.quality;
   if (!qualityLabel) {
-    return res.redirect('/');
+    return res.redirect('/'); // Or send an appropriate error message
   }
 
   const itagMap = {
@@ -81,53 +86,83 @@ router.post('/download', async function (req, res) {
       .replace(/[<>:"\/\\|?*]+/g, '_')
       .substring(0, 100);
 
-    const videoFormat = ytdl.chooseFormat(info.formats, { quality: itag });
-    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+    // Temporary file paths for video and audio
+    const videoPath = path.join(os.tmpdir(), `${sanitizedTitle}_video.mp4`);
+    const audioPath = path.join(os.tmpdir(), `${sanitizedTitle}_audio.mp3`);
+    const mergedPath = path.join(os.tmpdir(), `${sanitizedTitle}_merged.mp4`);
 
-    const videoStream = ytdl(url, { format: videoFormat });
-    const audioStream = ytdl(url, { format: audioFormat });
+    console.log(`Video Path: ${videoPath}`);
+    console.log(`Audio Path: ${audioPath}`);
+    console.log(`Merged Path: ${mergedPath}`);
 
-    // Create in-memory streams
-    const videoPassThrough = new PassThrough();
-    const audioPassThrough = new PassThrough();
+    // Streams to temporary files
+    const videoStream = ytdl(url, { quality: itag }).pipe(fs.createWriteStream(videoPath));
+    const audioStream = ytdl(url, { quality: 'highestaudio' }).pipe(fs.createWriteStream(audioPath));
 
-    // Pipe the video and audio streams to the PassThrough objects
-    videoStream.pipe(videoPassThrough);
-    audioStream.pipe(audioPassThrough);
+    // Wait until both video and audio streams finish writing to files
+    await new Promise((resolve, reject) => {
+      videoStream.on('finish', () => {
+        console.log('Video stream finished.');
+        resolve();
+      }).on('error', (err) => {
+        console.error('Video stream error:', err);
+        reject(err);
+      });
+    });
 
-    // Merging video and audio using fluent-ffmpeg
-    const mergedStream = new PassThrough();
+    await new Promise((resolve, reject) => {
+      audioStream.on('finish', () => {
+        console.log('Audio stream finished.');
+        resolve();
+      }).on('error', (err) => {
+        console.error('Audio stream error:', err);
+        reject(err);
+      });
+    });
+
+    // Merge video and audio with FFmpeg
     ffmpeg()
-      .input(videoPassThrough)
-      .input(audioPassThrough)
+      .input(videoPath)
+      .input(audioPath)
       .videoCodec('copy')
       .audioCodec('aac')
       .format('mp4')
-      .on('start', () => {
-        console.log('Merging video and audio...');
+      .on('start', (commandLine) => {
+        console.log(`Spawned FFmpeg with command: ${commandLine}`);
+      })
+      .on('progress', (progress) => {
+        console.log(`Merging progress: ${progress.percent}% done`);
+      })
+      .on('end', () => {
+        console.log('Merging complete.');
+
+        // Set headers for the download
+        res.header('Content-Disposition', `attachment; filename="${sanitizedTitle}_merged.mp4"`);
+        res.header('Content-Type', 'video/mp4');
+
+        // Pipe the merged file to the response
+        const readStream = fs.createReadStream(mergedPath);
+        readStream.pipe(res);
+
+        // Clean up the temporary files after streaming
+        readStream.on('close', () => {
+          fs.unlinkSync(videoPath);
+          fs.unlinkSync(audioPath);
+          fs.unlinkSync(mergedPath);
+        });
       })
       .on('error', (err) => {
         console.error('FFmpeg error:', err);
         if (!res.headersSent) {
-          res.redirect('/');
+          res.redirect('/'); // Or send an appropriate error message
         }
       })
-      .on('end', () => {
-        console.log('Merging complete.');
-      })
-      .pipe(mergedStream); // Output directly to the response
-
-    // Set headers for the download
-    res.header('Content-Disposition', `attachment; filename="${sanitizedTitle}_merged.mp4"`);
-    res.header('Content-Type', 'video/mp4');
-
-    // Send the merged video to the response
-    mergedStream.pipe(res);
+      .save(mergedPath); // Save the merged video to a temporary file
 
   } catch (error) {
     console.error('Download failed:', error);
     if (!res.headersSent) {
-      res.redirect('/');
+      res.redirect('/'); // Or send an appropriate error message
     }
   }
 });
