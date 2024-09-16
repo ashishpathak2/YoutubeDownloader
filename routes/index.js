@@ -1,50 +1,32 @@
-var express = require('express');
-var router = express.Router();
-const ytdl = require("@distube/ytdl-core");
+const express = require('express');
+const router = express.Router();
+const ytdl = require('@distube/ytdl-core');
+const ffmpeg = require('fluent-ffmpeg');
+const { dataFilter, sanitizeFileName, removeDuplicatesByQualityLabel } = require('../utils/ytdlDataFilter');
 const fs = require('fs');
 const path = require('path');
-const ffmpeg = require('fluent-ffmpeg');
-const os = require('os');
-const { removeDuplicatesByQualityLabel, dataFilter, sanitizeFileName } = require("../utils/ytdlDataFilter");
-let url = ""; // Ensuring URL is initialized as an empty string
 
-/* Helper function for delay */
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+let url = String;
+
+// Ensure the temp directory exists
+const tempDir = path.resolve(__dirname, '../temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
 }
 
-/* Retry logic with increased retries and delay */
-async function fetchVideoInfoWithRetry(url, retries = 5, delayMs = 5000) {
-  if (typeof url !== 'string') {
-    throw new TypeError('URL must be a string'); // Validate URL type
-  }
-
-  try {
-    return await ytdl.getInfo(url);
-  } catch (error) {
-    if (retries === 0 || error.statusCode !== 429) {
-      throw error; // Exit if no retries left or error is not 429
-    }
-    console.log(`Retrying due to 429 error... Attempts left: ${retries}, waiting ${delayMs / 1000} seconds`);
-    await delay(delayMs);
-    return fetchVideoInfoWithRetry(url, retries - 1, delayMs * 2); // Exponentially increase delay
-  }
-}
-
-/* GET home page */
+/* GET home page. */
 router.get('/', function (req, res) {
   res.render('index', { uniqueVideoDetails: [], videoInfo: null });
 });
 
-/* Handle video info retrieval */
 router.post('/link', async function (req, res) {
-  url = String(req.body.url).trim(); // Ensure URL is a string and trimmed
+  url = req.body.url;
   if (!url || !ytdl.validateURL(url)) {
-    return res.redirect("/"); // Or send an appropriate error message
+    return res.redirect('/');
   }
 
   try {
-    const info = await fetchVideoInfoWithRetry(url);
+    const info = await ytdl.getInfo(url);
     const qualityLabel = dataFilter(info);
     const uniqueVideoDetails = removeDuplicatesByQualityLabel(qualityLabel);
 
@@ -55,18 +37,17 @@ router.post('/link', async function (req, res) {
       thumbnail: info.videoDetails.thumbnails[0].url
     };
 
-    res.render("index", { uniqueVideoDetails, videoInfo });
+    res.render('index', { uniqueVideoDetails, videoInfo });
   } catch (error) {
     console.error('Error fetching video info:', error);
-    res.redirect("/"); // Or send an appropriate error message
+    res.redirect('/');
   }
 });
 
-/* Handle video download and merging */
 router.post('/download', async function (req, res) {
   const qualityLabel = req.body.quality;
   if (!qualityLabel) {
-    return res.redirect('/'); // Or send an appropriate error message
+    return res.redirect('/');
   }
 
   const itagMap = {
@@ -75,96 +56,135 @@ router.post('/download', async function (req, res) {
     '2160p': '137',
     '1440p': '137',
     '720p': '136',
-    '480p': '135'
+    '480p': '135',
   };
 
   const itag = itagMap[qualityLabel];
 
   try {
-    const info = await fetchVideoInfoWithRetry(url);
-    const sanitizedTitle = sanitizeFileName(info.videoDetails.title)
-      .replace(/[<>:"\/\\|?*]+/g, '_')
-      .substring(0, 100);
+    const info = await ytdl.getInfo(url);
+    const sanitizedTitle = sanitizeFileName(info.videoDetails.title).replace(/[<>:"\/\\|?*]+/g, '_').substring(0, 100);
 
-    // Temporary file paths for video and audio
-    const videoPath = path.join(os.tmpdir(), `${sanitizedTitle}_video.mp4`);
-    const audioPath = path.join(os.tmpdir(), `${sanitizedTitle}_audio.mp3`);
-    const mergedPath = path.join(os.tmpdir(), `${sanitizedTitle}_merged.mp4`);
+    // Create temporary file paths
+    const videoPath = path.resolve(tempDir, `${sanitizedTitle}_video.mp4`);
+    const audioPath = path.resolve(tempDir, `${sanitizedTitle}_audio.mp4`);
+    const outputFile = path.resolve(tempDir, `${sanitizedTitle}_merged.mp4`);
 
-    console.log(`Video Path: ${videoPath}`);
-    console.log(`Audio Path: ${audioPath}`);
-    console.log(`Merged Path: ${mergedPath}`);
+    // Download video and audio separately to temp files
+    const videoStream = ytdl(url, { quality: itag });
+    const audioStream = ytdl(url, { quality: 'highestaudio' });
 
-    // Streams to temporary files
-    const videoStream = ytdl(url, { quality: itag }).pipe(fs.createWriteStream(videoPath));
-    const audioStream = ytdl(url, { quality: 'highestaudio' }).pipe(fs.createWriteStream(audioPath));
+    // Pipe video and audio to files
+    const videoWriteStream = fs.createWriteStream(videoPath);
+    const audioWriteStream = fs.createWriteStream(audioPath);
 
-    // Wait until both video and audio streams finish writing to files
-    await new Promise((resolve, reject) => {
-      videoStream.on('finish', () => {
-        console.log('Video stream finished.');
-        resolve();
-      }).on('error', (err) => {
-        console.error('Video stream error:', err);
-        reject(err);
-      });
+    videoStream.pipe(videoWriteStream);
+    audioStream.pipe(audioWriteStream);
+
+    let videoFinished = false;
+    let audioFinished = false;
+
+    videoWriteStream.on('finish', () => {
+      console.log('Video download finished');
+      videoFinished = true;
+      if (audioFinished) checkMerge(res, videoPath, audioPath, outputFile);
     });
 
-    await new Promise((resolve, reject) => {
-      audioStream.on('finish', () => {
-        console.log('Audio stream finished.');
-        resolve();
-      }).on('error', (err) => {
-        console.error('Audio stream error:', err);
-        reject(err);
-      });
+    audioWriteStream.on('finish', () => {
+      console.log('Audio download finished');
+      audioFinished = true;
+      if (videoFinished) checkMerge(res, videoPath, audioPath, outputFile);
     });
 
-    // Merge video and audio with FFmpeg
+    videoWriteStream.on('error', (err) => {
+      console.error('Video stream error:', err);
+      handleError(res, 'Video stream error');
+    });
+
+    audioWriteStream.on('error', (err) => {
+      console.error('Audio stream error:', err);
+      handleError(res, 'Audio stream error');
+    });
+
+  } catch (error) {
+    console.error('Download failed:', error);
+    handleError(res, 'Download failed');
+  }
+});
+
+// Function to check if both video and audio have finished downloading, then merge them
+function checkMerge(res, videoPath, audioPath, outputFile) {
+  if (fs.existsSync(videoPath) && fs.existsSync(audioPath)) {
+    console.log('Both video and audio files are ready for merging.');
+
+    res.header('Content-Disposition', `attachment; filename="${path.basename(outputFile)}"`);
+    res.header('Content-Type', 'video/mp4');
+
+    // Now use ffmpeg to merge the video and audio
     ffmpeg()
       .input(videoPath)
       .input(audioPath)
       .videoCodec('copy')
       .audioCodec('aac')
       .format('mp4')
+      .output(outputFile)
       .on('start', (commandLine) => {
-        console.log(`Spawned FFmpeg with command: ${commandLine}`);
+        console.log('Merging started');
+        console.log('FFmpeg command:', commandLine); // Log the ffmpeg command
       })
-      .on('progress', (progress) => {
-        console.log(`Merging progress: ${progress.percent}% done`);
+      .on('stderr', (stderrLine) => {
+        console.log('FFmpeg stderr:', stderrLine); // Log ffmpeg errors and warnings
       })
       .on('end', () => {
-        console.log('Merging complete.');
-
-        // Set headers for the download
-        res.header('Content-Disposition', `attachment; filename="${sanitizedTitle}_merged.mp4"`);
-        res.header('Content-Type', 'video/mp4');
-
-        // Pipe the merged file to the response
-        const readStream = fs.createReadStream(mergedPath);
-        readStream.pipe(res);
-
-        // Clean up the temporary files after streaming
-        readStream.on('close', () => {
-          fs.unlinkSync(videoPath);
-          fs.unlinkSync(audioPath);
-          fs.unlinkSync(mergedPath);
-        });
+        console.log('Merging finished');
+        // Ensure the file is not locked before sending it
+        setTimeout(() => {
+          res.download(outputFile, (err) => {
+            if (err) {
+              console.error('Error sending the file:', err);
+            }
+            // Clean up the temporary files
+            fs.unlink(videoPath, (unlinkErr) => {
+              if (unlinkErr) console.error('Error deleting video file:', unlinkErr);
+            });
+            fs.unlink(audioPath, (unlinkErr) => {
+              if (unlinkErr) console.error('Error deleting audio file:', unlinkErr);
+            });
+            fs.unlink(outputFile, (unlinkErr) => {
+              if (unlinkErr) console.error('Error deleting merged file:', unlinkErr);
+            });
+          });
+        }, 1000); // Delay added to ensure all processes are finished
       })
-      .on('error', (err) => {
-        console.error('FFmpeg error:', err);
-        if (!res.headersSent) {
-          res.redirect('/'); // Or send an appropriate error message
-        }
+      .on('error', (err, stdout, stderr) => {
+        console.error('Merging failed:', err);
+        console.log('FFmpeg stdout:', stdout);
+        console.log('FFmpeg stderr:', stderr);
+        // Clean up files even on error with a delay to avoid EBUSY error
+        setTimeout(() => {
+          fs.unlink(videoPath, (unlinkErr) => {
+            if (unlinkErr) console.error('Error deleting video file:', unlinkErr);
+          });
+          fs.unlink(audioPath, (unlinkErr) => {
+            if (unlinkErr) console.error('Error deleting audio file:', unlinkErr);
+          });
+          fs.unlink(outputFile, (unlinkErr) => {
+            if (unlinkErr) console.error('Error deleting merged file:', unlinkErr);
+          });
+        }, 1000);
+        handleError(res, 'Merging failed');
       })
-      .save(mergedPath); // Save the merged video to a temporary file
-
-  } catch (error) {
-    console.error('Download failed:', error);
-    if (!res.headersSent) {
-      res.redirect('/'); // Or send an appropriate error message
-    }
+      .run();
   }
-});
+}
+
+// Handle errors and avoid multiple header responses
+function handleError(res, errorMessage) {
+  if (!res.headersSent) {
+    res.status(500).send(errorMessage);
+  } else {
+    console.error('Error after headers were sent:', errorMessage);
+  }
+}
 
 module.exports = router;
