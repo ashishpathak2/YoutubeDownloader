@@ -32,7 +32,7 @@ router.post('/link', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: `http://localhost:${process.env.PORT}`
+          proxy: "https://youtubedownloader-1-8es3.onrender.com"
         }
       }
     });
@@ -77,7 +77,7 @@ router.post('/download', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: `http://localhost:${process.env.PORT}`
+          proxy: "https://youtubedownloader-1-8es3.onrender.com"
         }
       }
     });
@@ -94,7 +94,7 @@ router.post('/download', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: `http://localhost:${process.env.PORT}`
+          proxy: "https://youtubedownloader-1-8es3.onrender.com"
         }
       }
     });
@@ -104,7 +104,7 @@ router.post('/download', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: `http://localhost:${process.env.PORT}`
+          proxy: "https://youtubedownloader-1-8es3.onrender.com"
         }
       }
     });
