@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const ytdl = require('@distube/ytdl-core');
 const ffmpeg = require('fluent-ffmpeg');
-const puppeteer = require('puppeteer'); // Import puppeteer
 const { dataFilter, sanitizeFileName, removeDuplicatesByQualityLabel } = require('../utils/ytdlDataFilter');
 const fs = require('fs');
 const path = require('path');
@@ -20,45 +19,24 @@ router.get('/', function (req, res) {
   res.render('index', { uniqueVideoDetails: [], videoInfo: null });
 });
 
-// Puppeteer function to get YouTube page content
-async function getYouTubePageContent(url) {
-  const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-  
-  // Set a user agent to simulate a real browser
-  await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3');
-  
-  await page.goto(url, {
-    waitUntil: 'networkidle2',
-  });
-
-  // Extract video URL if needed or bypass restrictions
-  const cookies = await page.cookies();
-  const cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
-  
-  await browser.close();
-  return cookieString;
-}
-
 router.post('/link', async function (req, res) {
+  const cookie = "SID=g.a000oAj2ZEBsKYu8PiNfdOJrqku1wOqy0uaVV9Mn8WC0qVGKSbNcLEBbIAaeOcvRiVgfvrdWLQACgYKASUSARQSFQHGX2MiY7k9wpkg690zFZ42fGMlMxoVAUF8yKp-74tndRm_ClX8vVYoKd_-0076; __Secure-1PSID=g.a000oAj2ZEBsKYu8PiNfdOJrqku1wOqy0uaVV9Mn8WC0qVGKSbNcGvFFcYJ-w33K8yL3GiG58AACgYKAYkSARQSFQHGX2MiPAoL-T39KCyDGde60v_ZJxoVAUF8yKoxuhVE34GUaCaYfmNK0Jt10076; __Secure-3PSID=g.a000oAj2ZEBsKYu8PiNfdOJrqku1wOqy0uaVV9Mn8WC0qVGKSbNclZscsV28A_A4WODH-zl99gACgYKARcSARQSFQHGX2MiKUZfAHvEX252c_5WLUZrBhoVAUF8yKo0erxLfEqDgGAzemfAPn5C0076; HSID=At0nFZP20pzR2O0Vy; SSID=ALPSQMMtCngD3DjRe; APISID=_tqtJraCzhbSxLKs/AO-S_mGFU7In8vbxk; SAPISID=dBFwRulJjfwihxmR/AQr1A1Rum0nk6jZSx; __Secure-1PAPISID=dBFwRulJjfwihxmR/AQr1A1Rum0nk6jZSx; __Secure-3PAPISID=dBFwRulJjfwihxmR/AQr1A1Rum0nk6jZSx; VISITOR_INFO1_LIVE=Jm37A2d_OGU; VISITOR_PRIVACY_METADATA=CgJJThIEGgAgDQ%3D%3D; LOGIN_INFO=AFmmF2swRAIgDJoK4pRFUBLtj38-iab_oyYSM5KE4iqD82Dcm2j9i2ICIC0hxQfX_JjkB-F8E2etSEDmQ1LGO685yEw32hlNLu84:QUQ3MjNmelBjdzdPbS16cFJlaS1vdDlEcnZmeE13VnlPUVh5QXphSEtlVmhQVnlkQnBfSjJyY056LVlyeHh1TFVOOE04bV9iRmxiSmUwU2VwM3loRUJ5aWo5QnhteTBKWG43M2hLbVVwYVcyWVNuRHVnZHdGX1UwMWlsNmZFOVBIUnhUeWRLS0FEVTRXTzFVRUItT2xfTEZJdF83bENZTTdn; OTZ=7735227_34_34__34_; NID=517=w5AhclVP6HP7zPbhrOUa_l4VpW8G1uPy0E1oS3mIa2A19CNKUJJwU_UKL53YRqSoy2HxvidlCpWCTh5mhcUsoimwT5SMCSOSvb9o62s1LL6lCap9oIrAsrRl3Mt--pM_ynzaNO9HLekGmHgHz-Av7WYjhaQHcv8qcPb4tu-HnpsMkTeHOR7S85myKDxPBZJ5LHQTTKSYniz2sjpqHKU_EJl7f81QaMOb9CepiqzJ200kDqJvbxHVjdlrbawYhM8VF1QK6DyyeYA3v1wdjw; YSC=YQLACkwq3Aw; PREF=f4=4000000&f6=40000000&tz=Asia.Calcutta&f7=100&f5=30000; __Secure-1PSIDTS=sidts-CjEBQlrA-CHDqojuxPvIkT4pTQ_m_LzDb4dEBjlGnXXJXyOLiD4Zcc4xC70D_-uIi0-9EAA; __Secure-3PSIDTS=sidts-CjEBQlrA-CHDqojuxPvIkT4pTQ_m_LzDb4dEBjlGnXXJXyOLiD4Zcc4xC70D_-uIi0-9EAA; SIDCC=AKEyXzVvuoxsn96CitEZWFk5LQF71wOYRo8q6E3Qknd8jOqwoEwp0PBtu9axAMHzXQBIxMHAP-0; __Secure-1PSIDCC=AKEyXzVDpqerqeNBYufFuTSKJVY_kZwogqqHickA1c-fMt1CmQ30bXkx1PtFeHVdwWNRyNFWL5M; __Secure-3PSIDCC=AKEyXzWVJUD2fbAOtHTbnPjKX1JD4iJEodYc2tXAB8D-HZIdW3mxVmU4YVBvHfwf3vkMTVEWjA";
+
   url = req.body.url;
   if (!url || !ytdl.validateURL(url)) {
     return res.redirect('/');
   }
 
   try {
-    // Get cookies using Puppeteer
-    const cookie = await getYouTubePageContent(url);
-
-    const info = await ytdl.getInfo(url, {
+    const info = await ytdl.getInfo(url ,{
       requestOptions: {
         headers: {
-          Cookie: cookie, // Add Puppeteer-extracted cookies here
+          Cookie: cookie, // Add the extracted cookie here
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
-
     const qualityLabel = dataFilter(info);
     const uniqueVideoDetails = removeDuplicatesByQualityLabel(qualityLabel);
 
@@ -77,12 +55,16 @@ router.post('/link', async function (req, res) {
 });
 
 router.post('/download', async function (req, res) {
+  const cookie = "SID=g.a000oAj2ZEBsKYu8PiNfdOJrqku1wOqy0uaVV9Mn8WC0qVGKSbNcLEBbIAaeOcvRiVgfvrdWLQACgYKASUSARQSFQHGX2MiY7k9wpkg690zFZ42fGMlMxoVAUF8yKp-74tndRm_ClX8vVYoKd_-0076; __Secure-1PSID=g.a000oAj2ZEBsKYu8PiNfdOJrqku1wOqy0uaVV9Mn8WC0qVGKSbNcGvFFcYJ-w33K8yL3GiG58AACgYKAYkSARQSFQHGX2MiPAoL-T39KCyDGde60v_ZJxoVAUF8yKoxuhVE34GUaCaYfmNK0Jt10076; __Secure-3PSID=g.a000oAj2ZEBsKYu8PiNfdOJrqku1wOqy0uaVV9Mn8WC0qVGKSbNclZscsV28A_A4WODH-zl99gACgYKARcSARQSFQHGX2MiKUZfAHvEX252c_5WLUZrBhoVAUF8yKo0erxLfEqDgGAzemfAPn5C0076; HSID=At0nFZP20pzR2O0Vy; SSID=ALPSQMMtCngD3DjRe; APISID=_tqtJraCzhbSxLKs/AO-S_mGFU7In8vbxk; SAPISID=dBFwRulJjfwihxmR/AQr1A1Rum0nk6jZSx; __Secure-1PAPISID=dBFwRulJjfwihxmR/AQr1A1Rum0nk6jZSx; __Secure-3PAPISID=dBFwRulJjfwihxmR/AQr1A1Rum0nk6jZSx; VISITOR_INFO1_LIVE=Jm37A2d_OGU; VISITOR_PRIVACY_METADATA=CgJJThIEGgAgDQ%3D%3D; LOGIN_INFO=AFmmF2swRAIgDJoK4pRFUBLtj38-iab_oyYSM5KE4iqD82Dcm2j9i2ICIC0hxQfX_JjkB-F8E2etSEDmQ1LGO685yEw32hlNLu84:QUQ3MjNmelBjdzdPbS16cFJlaS1vdDlEcnZmeE13VnlPUVh5QXphSEtlVmhQVnlkQnBfSjJyY056LVlyeHh1TFVOOE04bV9iRmxiSmUwU2VwM3loRUJ5aWo5QnhteTBKWG43M2hLbVVwYVcyWVNuRHVnZHdGX1UwMWlsNmZFOVBIUnhUeWRLS0FEVTRXTzFVRUItT2xfTEZJdF83bENZTTdn; OTZ=7735227_34_34__34_; NID=517=w5AhclVP6HP7zPbhrOUa_l4VpW8G1uPy0E1oS3mIa2A19CNKUJJwU_UKL53YRqSoy2HxvidlCpWCTh5mhcUsoimwT5SMCSOSvb9o62s1LL6lCap9oIrAsrRl3Mt--pM_ynzaNO9HLekGmHgHz-Av7WYjhaQHcv8qcPb4tu-HnpsMkTeHOR7S85myKDxPBZJ5LHQTTKSYniz2sjpqHKU_EJl7f81QaMOb9CepiqzJ200kDqJvbxHVjdlrbawYhM8VF1QK6DyyeYA3v1wdjw; YSC=YQLACkwq3Aw; PREF=f4=4000000&f6=40000000&tz=Asia.Calcutta&f7=100&f5=30000; __Secure-1PSIDTS=sidts-CjEBQlrA-CHDqojuxPvIkT4pTQ_m_LzDb4dEBjlGnXXJXyOLiD4Zcc4xC70D_-uIi0-9EAA; __Secure-3PSIDTS=sidts-CjEBQlrA-CHDqojuxPvIkT4pTQ_m_LzDb4dEBjlGnXXJXyOLiD4Zcc4xC70D_-uIi0-9EAA; SIDCC=AKEyXzVvuoxsn96CitEZWFk5LQF71wOYRo8q6E3Qknd8jOqwoEwp0PBtu9axAMHzXQBIxMHAP-0; __Secure-1PSIDCC=AKEyXzVDpqerqeNBYufFuTSKJVY_kZwogqqHickA1c-fMt1CmQ30bXkx1PtFeHVdwWNRyNFWL5M; __Secure-3PSIDCC=AKEyXzWVJUD2fbAOtHTbnPjKX1JD4iJEodYc2tXAB8D-HZIdW3mxVmU4YVBvHfwf3vkMTVEWjA";
+
   const qualityLabel = req.body.quality;
   if (!qualityLabel) {
     return res.redirect('/');
   }
 
   const itagMap = {
+    '144p': '18',
+    '240p': '18',
     '360p': '18',
     '1080p': '137',
     '2160p': '137',
@@ -94,17 +76,15 @@ router.post('/download', async function (req, res) {
   const itag = itagMap[qualityLabel];
 
   try {
-    const cookie = await getYouTubePageContent(url); // Use Puppeteer to get cookies
-
-    const info = await ytdl.getInfo(url, {
+    const info = await ytdl.getInfo(url ,{
       requestOptions: {
         headers: {
-          Cookie: cookie, // Add Puppeteer-extracted cookies here
+          Cookie: cookie, // Add the extracted cookie here
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
-
     const sanitizedTitle = sanitizeFileName(info.videoDetails.title).replace(/[<>:"\/\\|?*]+/g, '_').substring(0, 100);
 
     // Create temporary file paths
@@ -117,7 +97,8 @@ router.post('/download', async function (req, res) {
       quality: itag,
       requestOptions: {
         headers: {
-          Cookie: cookie, // Add Puppeteer-extracted cookies here
+          Cookie: cookie, // Add the extracted cookie here
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
@@ -127,11 +108,13 @@ router.post('/download', async function (req, res) {
       quality: 'highestaudio',
       requestOptions: {
         headers: {
-          Cookie: cookie, // Add Puppeteer-extracted cookies here
+          Cookie: cookie, // Add the extracted cookie here
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
+
 
     // Pipe video and audio to files
     const videoWriteStream = fs.createWriteStream(videoPath);
@@ -171,6 +154,7 @@ router.post('/download', async function (req, res) {
   }
 });
 
+// Function to check if both video and audio have finished downloading, then merge them
 function checkMerge(res, videoPath, audioPath, outputFile) {
   if (fs.existsSync(videoPath) && fs.existsSync(audioPath)) {
     console.log('Both video and audio files are ready for merging.');
@@ -202,18 +186,57 @@ function checkMerge(res, videoPath, audioPath, outputFile) {
               console.error('Error sending the file:', err);
             }
             // Clean up the temporary files
-            fs.unlink(videoPath, () => {});
-            fs.unlink(audioPath, () => {});
-            fs.unlink(outputFile, () => {});
+            fs.unlink(videoPath, (unlinkErr) => {
+              if (unlinkErr) console.error('Error deleting video file:', unlinkErr);
+            });
+            fs.unlink(audioPath, (unlinkErr) => {
+              if (unlinkErr) console.error('Error deleting audio file:', unlinkErr);
+            });
+            fs.unlink(outputFile, (unlinkErr) => {
+              if (unlinkErr) console.error('Error deleting merged file:', unlinkErr);
+            });
           });
-        }, 500);
+        }, 1000); // Delay added to ensure all processes are finished
+      })
+      .on('error', (err, stdout, stderr) => {
+        console.error('Merging failed:', err);
+        console.log('FFmpeg stdout:', stdout);
+        console.log('FFmpeg stderr:', stderr);
+        // Clean up files even on error with a delay to avoid EBUSY error
+        setTimeout(() => {
+          fs.unlink(videoPath, (unlinkErr) => {
+            if (unlinkErr) console.error('Error deleting video file:', unlinkErr);
+          });
+          fs.unlink(audioPath, (unlinkErr) => {
+            if (unlinkErr) console.error('Error deleting audio file:', unlinkErr);
+          });
+          fs.unlink(outputFile, (unlinkErr) => {
+            if (unlinkErr) console.error('Error deleting merged file:', unlinkErr);
+          });
+        }, 1000);
+        handleError(res, 'Merging failed');
       })
       .run();
   }
 }
 
+// Handle errors and avoid multiple header responses
 function handleError(res, errorMessage) {
-  res.status(500).send(errorMessage);
+  if (!res.headersSent) {
+    res.status(500).send(errorMessage);
+  } else {
+    console.error('Error after headers were sent:', errorMessage);
+  }
 }
 
 module.exports = router;
+
+
+
+
+
+
+
+
+
+
