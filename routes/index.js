@@ -32,7 +32,8 @@ router.post('/link', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: "https://youtubedownloader-1-8es3.onrender.com"
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
@@ -77,7 +78,8 @@ router.post('/download', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: "https://youtubedownloader-1-8es3.onrender.com"
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
@@ -94,7 +96,8 @@ router.post('/download', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: "https://youtubedownloader-1-8es3.onrender.com"
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
@@ -104,7 +107,8 @@ router.post('/download', async function (req, res) {
       requestOptions: {
         headers: {
           Cookie: cookie, // Add the extracted cookie here
-          proxy: "https://youtubedownloader-1-8es3.onrender.com"
+          proxy: "https://youtubedownloader-1-8es3.onrender.com",
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
         }
       }
     });
